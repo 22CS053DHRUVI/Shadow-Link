@@ -1,9 +1,9 @@
 {
   "name": "shadow-link",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Mobile-first two-player cross-dimension co-op adventure for the web.",
+  "description": "Mobile-first two-player cross-dimension action campaign with 20 co-op levels.",
   "scripts": {
     "dev": "vercel dev",
     "start": "vercel dev",

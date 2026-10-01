@@ -1,0 +1,23 @@
+{
+  "name": "shadow-link",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mobile-first two-player cross-dimension co-op adventure for the web.",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev",
+    "check": "node --check api/ws.js && node --check server/gameHub.js && node --check src/game.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "ioredis": "^5.8.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "vercel": "^54.14.2"
+  }
+}

@@ -3,94 +3,159 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#080b16" />
-  <meta name="description" content="Shadow Link — a two-player cross-dimension co-op adventure." />
-  <title>Shadow Link</title>
+  <meta name="theme-color" content="#070911" />
+  <meta name="description" content="Shadow Link — a two-player cross-dimension action adventure." />
+  <title>Shadow Link: Rift Run</title>
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
   <main id="app">
-    <section id="lobby" class="screen lobby-screen">
-      <div class="brand-mark" aria-hidden="true">
-        <span class="sun-half"></span><span class="moon-half"></span>
+    <section id="homeScreen" class="screen home-screen">
+      <div class="hero-orb" aria-hidden="true"><span></span></div>
+      <p class="eyebrow">TWO WORLDS · ONE BATTLE</p>
+      <h1>SHADOW <em>LINK</em></h1>
+      <p class="hero-copy">Fight through 20 co-op missions where Light and Shadow must break each other's enemies, survive unstable worlds, and unleash the Link together.</p>
+      <div class="home-actions">
+        <button id="continueBtn" class="btn btn-primary btn-large">Continue campaign</button>
+        <button id="levelSelectBtn" class="btn btn-glass">Level select</button>
       </div>
-      <p class="eyebrow">TWO WORLDS. ONE ESCAPE.</p>
-      <h1>Shadow Link</h1>
-      <p class="tagline">Two players enter the same temple from different dimensions. What you change in your world can save your partner in theirs.</p>
-
-      <div class="lobby-card">
-        <label for="playerName">Explorer name</label>
-        <input id="playerName" autocomplete="nickname" maxlength="16" placeholder="Explorer" />
-
-        <div class="lobby-actions">
-          <button id="createRoom" class="primary-btn" type="button">Create room</button>
-          <div class="divider"><span>or join</span></div>
-          <div class="join-row">
-            <input id="roomCode" inputmode="text" maxlength="6" autocomplete="off" placeholder="ROOM CODE" aria-label="Room code" />
-            <button id="joinRoom" class="secondary-btn" type="button">Join</button>
-          </div>
-        </div>
-        <p id="lobbyError" class="error-text" role="alert"></p>
-      </div>
-
-      <div class="micro-copy">
-        <span>📱 Mobile-first</span>
-        <span>⚡ Real-time</span>
-        <span>👥 2 players</span>
+      <div class="feature-chips">
+        <span>20 LEVELS</span><span>2 PLAYER CO-OP</span><span>REAL-TIME COMBAT</span>
       </div>
     </section>
 
-    <section id="game" class="screen game-screen hidden" aria-label="Shadow Link game">
-      <div class="hud top-hud">
-        <div class="hud-group">
-          <span id="roleBadge" class="role-badge">LIGHT</span>
-          <span id="roomLabel" class="room-label">ROOM -----</span>
-        </div>
-        <div class="hud-group right">
-          <span id="connectionDot" class="connection-dot"></span>
-          <span id="latency">-- ms</span>
-          <button id="leaveGame" class="icon-btn" type="button" aria-label="Leave game">✕</button>
+    <section id="levelsScreen" class="screen menu-screen hidden">
+      <header class="menu-header">
+        <button class="back-btn" data-back="homeScreen">‹</button>
+        <div><p class="eyebrow">CAMPAIGN</p><h2>Select mission</h2></div>
+        <div id="progressLabel" class="progress-pill">1 / 20</div>
+      </header>
+      <div id="chapterTabs" class="chapter-tabs"></div>
+      <div id="levelGrid" class="level-grid"></div>
+    </section>
+
+    <section id="roomScreen" class="screen menu-screen hidden">
+      <header class="menu-header">
+        <button class="back-btn" data-back="levelsScreen">‹</button>
+        <div><p id="roomChapter" class="eyebrow">CHAPTER I</p><h2 id="roomLevelTitle">Level 1 · Awakening</h2></div>
+      </header>
+
+      <div class="mission-preview">
+        <div class="mission-number" id="missionNumber">01</div>
+        <div>
+          <p id="missionTwist" class="mission-tag">BASIC COMBAT</p>
+          <h3 id="missionName">Awakening</h3>
+          <p id="missionIntro">Two guardians wake in parallel worlds.</p>
+          <div id="difficultyStars" class="difficulty-stars">★☆☆☆☆</div>
         </div>
       </div>
 
-      <div class="objective-bar">
-        <span class="objective-label">OBJECTIVE</span>
-        <span id="objectiveText">Waiting for your partner…</span>
+      <div class="room-card">
+        <label for="playerName">Guardian name</label>
+        <input id="playerName" autocomplete="nickname" maxlength="16" placeholder="Guardian" />
+        <button id="createRoom" class="btn btn-primary">Create co-op room</button>
+        <div class="or-line"><span>OR JOIN A FRIEND</span></div>
+        <div class="join-row">
+          <input id="roomCode" maxlength="6" autocomplete="off" placeholder="ROOM CODE" />
+          <button id="joinRoom" class="btn btn-shadow">Join</button>
+        </div>
+        <p id="lobbyError" class="error-text"></p>
+      </div>
+    </section>
+
+    <section id="gameScreen" class="screen game-screen hidden">
+      <div class="game-hud">
+        <div class="hud-left">
+          <div class="level-chip"><small>LEVEL</small><strong id="hudLevel">01</strong></div>
+          <div class="hud-mission">
+            <strong id="hudLevelName">Awakening</strong>
+            <span id="objectiveText">Waiting for partner...</span>
+          </div>
+        </div>
+
+        <div class="link-panel">
+          <div class="link-title"><span>LINK</span><b id="linkPercent">0%</b></div>
+          <div class="meter"><i id="linkFill"></i></div>
+        </div>
+
+        <div class="hud-right">
+          <span id="roleBadge" class="role-badge">LIGHT</span>
+          <span id="latency" class="ping-pill">-- ms</span>
+          <button id="leaveGame" class="icon-btn" aria-label="Leave">✕</button>
+        </div>
+      </div>
+
+      <div class="health-row">
+        <div class="health-card self-health">
+          <span>YOU</span><div class="hp-meter"><i id="selfHpFill"></i></div><b id="selfHpText">100</b>
+        </div>
+        <div class="room-mini">ROOM <b id="roomLabel">-----</b></div>
+        <div class="health-card partner-health">
+          <span>PARTNER</span><div class="hp-meter"><i id="partnerHpFill"></i></div><b id="partnerHpText">--</b>
+        </div>
       </div>
 
       <div id="gameStage" class="game-stage">
-        <canvas id="gameCanvas" width="1000" height="620" aria-label="Game world"></canvas>
-        <div id="waitingOverlay" class="waiting-overlay">
-          <div class="waiting-card">
-            <div class="pulse-ring"></div>
-            <strong>Waiting for your linked explorer</strong>
-            <span>Share room <b id="shareCode">-----</b></span>
+        <canvas id="gameCanvas" width="1200" height="700"></canvas>
+
+        <div id="waitingOverlay" class="center-overlay">
+          <div class="glass-modal compact">
+            <div class="link-spinner"></div>
+            <p class="eyebrow">ROOM READY</p>
+            <h3>Waiting for partner</h3>
+            <p>Share code <strong id="shareCode">-----</strong></p>
           </div>
         </div>
-        <div id="toast" class="toast" aria-live="polite"></div>
-        <div id="victoryOverlay" class="victory-overlay hidden">
-          <div class="victory-card">
-            <p class="eyebrow">THE LINK HELD</p>
-            <h2>Temple escaped</h2>
-            <p>You crossed two dimensions as one team.</p>
-            <button id="restartGame" class="primary-btn" type="button">Play again</button>
+
+        <div id="introOverlay" class="center-overlay hidden">
+          <div class="intro-card">
+            <p id="introChapter" class="eyebrow">CHAPTER I</p>
+            <div id="introLevel" class="intro-level">LEVEL 01</div>
+            <h2 id="introTitle">Awakening</h2>
+            <p id="introText"></p>
+            <div id="introCountdown" class="countdown">3</div>
           </div>
         </div>
+
+        <div id="resultOverlay" class="center-overlay hidden">
+          <div class="result-card">
+            <p class="eyebrow">MISSION COMPLETE</p>
+            <h2 id="resultTitle">Awakening cleared</h2>
+            <div id="resultStars" class="result-stars">★★★</div>
+            <div class="result-stats">
+              <div><small>TIME</small><b id="resultTime">00:00</b></div>
+              <div><small>ENEMIES</small><b id="resultKills">0</b></div>
+              <div><small>LINK PEAK</small><b id="resultLink">0%</b></div>
+            </div>
+            <button id="nextLevelBtn" class="btn btn-primary">Next mission</button>
+            <button id="replayBtn" class="btn btn-glass">Replay</button>
+          </div>
+        </div>
+
+        <div id="failedOverlay" class="center-overlay hidden">
+          <div class="result-card">
+            <p class="eyebrow danger">LINK BROKEN</p>
+            <h2>Mission failed</h2>
+            <p>Your team was overwhelmed by the Rift.</p>
+            <button id="retryBtn" class="btn btn-primary">Retry mission</button>
+          </div>
+        </div>
+
+        <div id="toast" class="toast"></div>
       </div>
 
-      <div class="touch-controls" aria-label="Touch controls">
-        <div id="joystick" class="joystick" aria-label="Movement joystick">
-          <div id="joystickKnob" class="joystick-knob"></div>
-        </div>
-        <div class="action-controls">
-          <button id="dashBtn" class="action-btn dash-btn" type="button"><span>↯</span><small>DASH</small></button>
-          <button id="interactBtn" class="action-btn interact-btn" type="button"><span>✦</span><small>LINK</small></button>
+      <div class="mobile-controls">
+        <div id="joystick" class="joystick"><div id="joystickKnob" class="joystick-knob"></div></div>
+        <div class="action-cluster">
+          <button id="dashBtn" class="game-btn utility"><span>↯</span><small>DASH</small></button>
+          <button id="specialBtn" class="game-btn special"><span>◆</span><small>SKILL</small></button>
+          <button id="attackBtn" class="game-btn attack"><span>⚔</span><small>ATTACK</small></button>
+          <button id="linkBtn" class="game-btn link"><span>✦</span><small>LINK</small></button>
         </div>
       </div>
-      <p class="desktop-help">Desktop: WASD / arrows · Shift to dash · E to interact</p>
+      <p class="desktop-hint">WASD / arrows · J attack · K skill · Shift dash · L Link Burst</p>
     </section>
   </main>
-
   <script type="module" src="/src/game.js"></script>
 </body>
 </html>

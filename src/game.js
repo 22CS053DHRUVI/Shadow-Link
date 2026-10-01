@@ -1,811 +1,274 @@
-const WORLD = { width: 1000, height: 620 };
-const PLAYER_RADIUS = 18;
-const NET_INTERVAL_MS = 50; // 20 Hz
-const PING_INTERVAL_MS = 2000;
-const RECONNECT_MAX_MS = 5000;
+import { LEVELS, CHAPTERS, getLevel, getChapter } from '../shared/levels.js';
 
-const els = {
-  lobby: document.querySelector('#lobby'),
-  game: document.querySelector('#game'),
-  playerName: document.querySelector('#playerName'),
-  roomCode: document.querySelector('#roomCode'),
-  createRoom: document.querySelector('#createRoom'),
-  joinRoom: document.querySelector('#joinRoom'),
-  lobbyError: document.querySelector('#lobbyError'),
-  roleBadge: document.querySelector('#roleBadge'),
-  roomLabel: document.querySelector('#roomLabel'),
-  shareCode: document.querySelector('#shareCode'),
-  connectionDot: document.querySelector('#connectionDot'),
-  latency: document.querySelector('#latency'),
-  objectiveText: document.querySelector('#objectiveText'),
-  waitingOverlay: document.querySelector('#waitingOverlay'),
-  victoryOverlay: document.querySelector('#victoryOverlay'),
-  toast: document.querySelector('#toast'),
-  leaveGame: document.querySelector('#leaveGame'),
-  restartGame: document.querySelector('#restartGame'),
-  canvas: document.querySelector('#gameCanvas'),
-  joystick: document.querySelector('#joystick'),
-  joystickKnob: document.querySelector('#joystickKnob'),
-  dashBtn: document.querySelector('#dashBtn'),
-  interactBtn: document.querySelector('#interactBtn'),
+const WORLD={width:1200,height:700};
+const PLAYER_RADIUS=22, NET_MS=50, PING_MS=2000;
+const $=s=>document.querySelector(s);
+const els={
+  home:$('#homeScreen'),levels:$('#levelsScreen'),room:$('#roomScreen'),game:$('#gameScreen'),
+  continueBtn:$('#continueBtn'),levelSelectBtn:$('#levelSelectBtn'),chapterTabs:$('#chapterTabs'),levelGrid:$('#levelGrid'),
+  progressLabel:$('#progressLabel'),roomChapter:$('#roomChapter'),roomLevelTitle:$('#roomLevelTitle'),
+  missionNumber:$('#missionNumber'),missionTwist:$('#missionTwist'),missionName:$('#missionName'),missionIntro:$('#missionIntro'),difficultyStars:$('#difficultyStars'),
+  playerName:$('#playerName'),createRoom:$('#createRoom'),joinRoom:$('#joinRoom'),roomCode:$('#roomCode'),lobbyError:$('#lobbyError'),
+  hudLevel:$('#hudLevel'),hudLevelName:$('#hudLevelName'),objective:$('#objectiveText'),linkPercent:$('#linkPercent'),linkFill:$('#linkFill'),
+  roleBadge:$('#roleBadge'),latency:$('#latency'),leave:$('#leaveGame'),selfHpFill:$('#selfHpFill'),selfHpText:$('#selfHpText'),
+  partnerHpFill:$('#partnerHpFill'),partnerHpText:$('#partnerHpText'),roomLabel:$('#roomLabel'),shareCode:$('#shareCode'),
+  stage:$('#gameStage'),canvas:$('#gameCanvas'),waiting:$('#waitingOverlay'),intro:$('#introOverlay'),
+  introChapter:$('#introChapter'),introLevel:$('#introLevel'),introTitle:$('#introTitle'),introText:$('#introText'),introCountdown:$('#introCountdown'),
+  result:$('#resultOverlay'),resultTitle:$('#resultTitle'),resultStars:$('#resultStars'),resultTime:$('#resultTime'),resultKills:$('#resultKills'),resultLink:$('#resultLink'),
+  failed:$('#failedOverlay'),next:$('#nextLevelBtn'),replay:$('#replayBtn'),retry:$('#retryBtn'),toast:$('#toast'),
+  joystick:$('#joystick'),knob:$('#joystickKnob'),attack:$('#attackBtn'),special:$('#specialBtn'),dash:$('#dashBtn'),link:$('#linkBtn')
 };
+const ctx=els.canvas.getContext('2d');
 
-const ctx = els.canvas.getContext('2d');
-
-const state = {
-  socket: null,
-  reconnectTimer: null,
-  reconnectDelay: 350,
-  pingTimer: null,
-  intentionalClose: false,
-  roomId: '',
-  playerId: getPlayerId(),
-  name: sessionStorage.getItem('shadow-link:name') || '',
-  role: null,
-  connected: false,
-  joined: false,
-  peerConnected: false,
-  peer: null,
-  world: defaultWorld(),
-  local: { x: 110, y: 250, vx: 0, vy: 0, seq: 0 },
-  remote: { x: 110, y: 370, targetX: 110, targetY: 370, vx: 0, vy: 0 },
-  keys: new Set(),
-  stick: { x: 0, y: 0, pointerId: null },
-  dashUntil: 0,
-  dashCooldownUntil: 0,
-  lastFrame: performance.now(),
-  lastNetSend: 0,
-  lastSentX: NaN,
-  lastSentY: NaN,
-  toastTimer: null,
-  lastInteractTarget: null,
+const state={
+  selectedLevel:Number(localStorage.getItem('shadow-link:selected-level')||1),
+  unlocked:Number(localStorage.getItem('shadow-link:unlocked')||1),
+  stars:JSON.parse(localStorage.getItem('shadow-link:stars')||'{}'),
+  chapter:1, socket:null,roomId:'',playerId:sessionStorage.getItem('shadow-link:pid')||crypto.randomUUID(),
+  name:sessionStorage.getItem('shadow-link:name')||'',role:null,connected:false,joined:false,peer:null,peerConnected:false,
+  world:null,local:{x:125,y:250,vx:0,vy:0,seq:0,hp:100,maxHp:100},remote:{x:125,y:450,targetX:125,targetY:450,hp:100,maxHp:100},
+  keys:new Set(),stick:{x:0,y:0,pointerId:null},lastFrame:performance.now(),lastNet:0,lastSentX:NaN,lastSentY:NaN,
+  dashUntil:0,dashCooldown:0,specialCooldown:0,attackCooldown:0,lastTick:0,lastHurt:0,introPlayed:false,missionStartedAt:0,toastTimer:null,reconnect:null,reconnectDelay:400,
+  burstPeak:0,resultShown:false,enemyHitFx:new Map(),particles:[],shake:0
 };
+sessionStorage.setItem('shadow-link:pid',state.playerId);els.playerName.value=state.name;
 
-els.playerName.value = state.name;
-
-function defaultWorld() {
-  return {
-    lightGateOpen: false,
-    shadowGateOpen: false,
-    lightReady: false,
-    shadowReady: false,
-    victory: false,
-    round: 1,
-  };
+function show(screen){
+  for(const el of [els.home,els.levels,els.room,els.game])el.classList.add('hidden');
+  screen.classList.remove('hidden');
+}
+function level(){return getLevel(state.selectedLevel)}
+function pad(n){return String(n).padStart(2,'0')}
+function chapterRoman(n){return['I','II','III','IV'][n-1]||n}
+function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function fmtTime(ms){const s=Math.max(0,Math.floor(ms/1000));return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
+function makeRoomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',bytes=new Uint8Array(5);crypto.getRandomValues(bytes);return Array.from(bytes,b=>chars[b%chars.length]).join('')}
+function wsUrl(){const protocol=location.protocol==='https:'?'wss:':'ws:';return `${protocol}//${location.host}/api/ws`}
+function saveProgress(){
+  localStorage.setItem('shadow-link:selected-level',String(state.selectedLevel));
+  localStorage.setItem('shadow-link:unlocked',String(state.unlocked));
+  localStorage.setItem('shadow-link:stars',JSON.stringify(state.stars));
+}
+function toast(message){
+  clearTimeout(state.toastTimer);els.toast.textContent=message;els.toast.classList.add('show');
+  state.toastTimer=setTimeout(()=>els.toast.classList.remove('show'),1700);
 }
 
-function getPlayerId() {
-  let id = sessionStorage.getItem('shadow-link:playerId');
-  if (!id) {
-    id = crypto.randomUUID();
-    sessionStorage.setItem('shadow-link:playerId', id);
-  }
-  return id;
-}
-
-function makeRoomCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = new Uint8Array(5);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (n) => alphabet[n % alphabet.length]).join('');
-}
-
-function socketUrl() {
-  const explicit = window.__SHADOW_LINK_WS_URL__;
-  if (explicit) return explicit;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/ws`;
-}
-
-function showGame() {
-  els.lobby.classList.add('hidden');
-  els.game.classList.remove('hidden');
-  els.roomLabel.textContent = `ROOM ${state.roomId}`;
-  els.shareCode.textContent = state.roomId;
-  updateHud();
-}
-
-function showLobby(message = '') {
-  els.game.classList.add('hidden');
-  els.lobby.classList.remove('hidden');
-  els.lobbyError.textContent = message;
-}
-
-function connect(roomId) {
-  state.roomId = roomId.toUpperCase();
-  state.intentionalClose = false;
-  clearTimeout(state.reconnectTimer);
-  if (state.socket && state.socket.readyState < 2) state.socket.close();
-
-  let socket;
-  try {
-    socket = new WebSocket(socketUrl());
-  } catch {
-    showLobby('Could not open the realtime connection.');
-    return;
-  }
-  state.socket = socket;
-  state.connected = false;
-  state.joined = false;
-  updateHud();
-
-  socket.addEventListener('open', () => {
-    if (socket !== state.socket) return;
-    state.connected = true;
-    state.reconnectDelay = 350;
-    updateHud();
-    send({
-      type: 'join',
-      roomId: state.roomId,
-      playerId: state.playerId,
-      name: state.name,
-    });
-    startPing();
-  });
-
-  socket.addEventListener('message', (message) => {
-    if (socket !== state.socket) return;
-    let event;
-    try { event = JSON.parse(message.data); } catch { return; }
-    handleServerEvent(event);
-  });
-
-  socket.addEventListener('close', () => {
-    if (socket !== state.socket) return;
-    state.connected = false;
-    state.joined = false;
-    stopPing();
-    updateHud();
-    if (state.intentionalClose || !state.roomId) return;
-    clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = setTimeout(() => connect(state.roomId), state.reconnectDelay);
-    state.reconnectDelay = Math.min(Math.round(state.reconnectDelay * 1.7), RECONNECT_MAX_MS);
-  });
-
-  socket.addEventListener('error', () => {
-    if (socket !== state.socket) return;
-    state.connected = false;
-    updateHud();
-  });
-}
-
-function send(payload) {
-  if (state.socket?.readyState === WebSocket.OPEN) {
-    state.socket.send(JSON.stringify(payload));
-    return true;
-  }
-  return false;
-}
-
-function handleServerEvent(event) {
-  switch (event.type) {
-    case 'joined': {
-      state.joined = true;
-      state.role = event.role;
-      state.world = { ...defaultWorld(), ...(event.world || {}) };
-      const self = event.self || {};
-      state.local.x = Number(self.x ?? 110);
-      state.local.y = Number(self.y ?? (state.role === 'light' ? 250 : 370));
-      state.local.seq = Number(self.seq || 0);
-      const peer = Array.isArray(event.players)
-        ? event.players.find((p) => p.playerId !== state.playerId)
-        : null;
-      setPeer(peer);
-      showGame();
-      updateRoleTheme();
-      updateObjective();
-      toast(state.role === 'light' ? 'You entered the Light World' : 'You entered the Shadow World');
-      break;
-    }
-    case 'peer-joined':
-      if (event.player?.playerId !== state.playerId) {
-        setPeer(event.player);
-        toast(`${event.player.name || 'Your partner'} linked in`);
-      }
-      break;
-    case 'peer-left':
-      if (state.peer?.playerId === event.playerId) {
-        state.peerConnected = false;
-        els.waitingOverlay.classList.remove('hidden');
-        updateObjective();
-        toast('Your partner disconnected — their slot is reserved briefly');
-      }
-      break;
-    case 'player-state': {
-      const p = event.player;
-      if (!p || p.playerId === state.playerId) break;
-      if (!state.peer || state.peer.playerId !== p.playerId) setPeer(p);
-      state.remote.targetX = Number(p.x || 0);
-      state.remote.targetY = Number(p.y || 0);
-      state.remote.vx = Number(p.vx || 0);
-      state.remote.vy = Number(p.vy || 0);
-      state.peerConnected = true;
-      els.waitingOverlay.classList.add('hidden');
-      updateObjective();
-      break;
-    }
-    case 'world-state': {
-      const previous = state.world;
-      state.world = { ...defaultWorld(), ...(event.world || {}) };
-      if (!previous.lightGateOpen && state.world.lightGateOpen) toast('The Light Gate is open');
-      if (!previous.shadowGateOpen && state.world.shadowGateOpen) toast('The Shadow Seal is broken');
-      if (event.target === 'restart') resetRoundPosition();
-      updateObjective();
-      if (state.world.victory) els.victoryOverlay.classList.remove('hidden');
-      else els.victoryOverlay.classList.add('hidden');
-      break;
-    }
-    case 'pong': {
-      const rtt = Math.max(0, Date.now() - Number(event.clientTs || Date.now()));
-      els.latency.textContent = `${rtt} ms`;
-      break;
-    }
-    case 'error':
-      if (event.code === 'ROOM_FULL' || event.code === 'BAD_ROOM' || event.code === 'JOIN_FAILED') {
-        state.intentionalClose = true;
-        state.socket?.close();
-        state.roomId = '';
-        showLobby(event.message || 'Could not join room.');
-      } else {
-        toast(event.message || 'Something went wrong');
-      }
-      break;
+function renderChapters(){
+  els.chapterTabs.innerHTML='';
+  for(const c of CHAPTERS){
+    const b=document.createElement('button');b.textContent=`CHAPTER ${chapterRoman(c.id)} · ${c.name}`;
+    b.classList.toggle('active',state.chapter===c.id);b.onclick=()=>{state.chapter=c.id;renderChapters();renderLevels();};els.chapterTabs.appendChild(b);
   }
 }
-
-function setPeer(peer) {
-  if (!peer) {
-    state.peer = null;
-    state.peerConnected = false;
-    els.waitingOverlay.classList.remove('hidden');
-    return;
+function renderLevels(){
+  els.levelGrid.innerHTML='';
+  const items=LEVELS.filter(l=>l.chapter===state.chapter);
+  for(const l of items){
+    const locked=l.id>state.unlocked,stars=Number(state.stars[l.id]||0);
+    const b=document.createElement('button');b.className=`level-card ${locked?'locked':''}`;b.disabled=locked;
+    b.innerHTML=`<span class="num">LEVEL ${pad(l.id)}</span><span class="stars">${'★'.repeat(stars)}${'☆'.repeat(3-stars)}</span><h3>${l.name}</h3><p>${l.twist}</p>`;
+    b.onclick=()=>selectLevel(l.id);els.levelGrid.appendChild(b);
   }
-  state.peer = peer;
-  state.peerConnected = true;
-  state.remote.x = Number(peer.x ?? 110);
-  state.remote.y = Number(peer.y ?? (peer.role === 'light' ? 250 : 370));
-  state.remote.targetX = state.remote.x;
-  state.remote.targetY = state.remote.y;
-  els.waitingOverlay.classList.add('hidden');
+  els.progressLabel.textContent=`${Math.min(state.unlocked,20)} / 20`;
 }
-
-function startPing() {
-  stopPing();
-  const ping = () => send({ type: 'ping', clientTs: Date.now() });
-  ping();
-  state.pingTimer = setInterval(ping, PING_INTERVAL_MS);
+function selectLevel(id){
+  state.selectedLevel=id;state.chapter=getLevel(id).chapter;saveProgress();renderRoom();show(els.room);
 }
-
-function stopPing() {
-  if (state.pingTimer) clearInterval(state.pingTimer);
-  state.pingTimer = null;
+function renderRoom(){
+  const l=level(),c=getChapter(l.chapter);
+  els.roomChapter.textContent=`CHAPTER ${chapterRoman(c.id)} · ${c.name}`;els.roomLevelTitle.textContent=`Level ${l.id} · ${l.name}`;
+  els.missionNumber.textContent=pad(l.id);els.missionTwist.textContent=l.twist.toUpperCase();els.missionName.textContent=l.name;els.missionIntro.textContent=l.intro;
+  els.difficultyStars.textContent='★'.repeat(l.difficulty)+'☆'.repeat(5-l.difficulty);els.lobbyError.textContent='';
 }
+els.levelSelectBtn.onclick=()=>{state.chapter=getLevel(state.selectedLevel).chapter;renderChapters();renderLevels();show(els.levels)};
+els.continueBtn.onclick=()=>selectLevel(Math.min(state.unlocked,20));
+document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show($('#'+b.dataset.back)));
+renderChapters();renderLevels();
 
-function updateHud() {
-  els.connectionDot.classList.toggle('online', state.connected);
-  if (!state.connected) els.latency.textContent = 'offline';
-  if (state.roomId) {
-    els.roomLabel.textContent = `ROOM ${state.roomId}`;
-    els.shareCode.textContent = state.roomId;
+function beginRoom(roomId){
+  state.name=els.playerName.value.trim().replace(/[^a-zA-Z0-9 _-]/g,'').slice(0,16)||'Guardian';sessionStorage.setItem('shadow-link:name',state.name);
+  state.roomId=roomId;state.resultShown=false;state.introPlayed=false;els.lobbyError.textContent='';show(els.game);connect();
+}
+els.createRoom.onclick=()=>beginRoom(makeRoomCode());
+els.joinRoom.onclick=()=>{const r=els.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);if(r.length<4){els.lobbyError.textContent='Enter a valid 4–6 character room code.';return;}beginRoom(r)};
+els.roomCode.oninput=()=>els.roomCode.value=els.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
+
+function connect(){
+  clearTimeout(state.reconnect);state.connected=false;state.joined=false;
+  const ws=new WebSocket(wsUrl());state.socket=ws;
+  ws.onopen=()=>{if(ws!==state.socket)return;state.connected=true;state.reconnectDelay=400;send({type:'join',roomId:state.roomId,playerId:state.playerId,name:state.name,levelId:state.selectedLevel});ping();};
+  ws.onmessage=e=>{if(ws!==state.socket)return;let msg;try{msg=JSON.parse(e.data)}catch{return}handle(msg)};
+  ws.onclose=()=>{if(ws!==state.socket)return;state.connected=false;state.joined=false;updateHud();if(state.roomId){state.reconnect=setTimeout(connect,state.reconnectDelay);state.reconnectDelay=Math.min(5000,state.reconnectDelay*1.7)}};
+  ws.onerror=()=>{state.connected=false;updateHud()};
+}
+function send(o){if(state.socket?.readyState===WebSocket.OPEN){state.socket.send(JSON.stringify(o));return true}return false}
+function ping(){if(!state.roomId)return;send({type:'ping',clientTs:Date.now()});setTimeout(ping,PING_MS)}
+
+function handle(msg){
+  if(msg.type==='joined'){
+    state.joined=true;state.role=msg.role;state.world=msg.world;state.selectedLevel=Number(msg.world?.levelId||state.selectedLevel);saveProgress();
+    Object.assign(state.local,{x:msg.self.x,y:msg.self.y,seq:msg.self.seq||0,hp:msg.self.hp??100,maxHp:msg.self.maxHp??100});
+    const peer=msg.players?.find(p=>p.playerId!==state.playerId);setPeer(peer);state.missionStartedAt=Number(state.world?.startedAt||Date.now());
+    configureHud();updateHud();if(state.peerConnected)startIntro();return;
   }
-}
-
-function updateRoleTheme() {
-  const light = state.role === 'light';
-  els.roleBadge.textContent = light ? 'LIGHT' : 'SHADOW';
-  els.roleBadge.style.color = light ? 'var(--light)' : 'var(--shadow-2)';
-  els.roleBadge.style.background = light ? 'rgba(255,217,116,.13)' : 'rgba(155,131,255,.15)';
-}
-
-function updateObjective() {
-  if (!state.peerConnected) {
-    els.objectiveText.textContent = 'Waiting for your linked explorer…';
-    return;
+  if(msg.type==='peer-joined'&&msg.player?.playerId!==state.playerId){setPeer(msg.player);toast(`${msg.player.name||'Partner'} linked in`);if(state.joined)startIntro();return}
+  if(msg.type==='peer-left'&&state.peer?.playerId===msg.playerId){state.peerConnected=false;els.waiting.classList.remove('hidden');toast('Partner disconnected');return}
+  if(msg.type==='player-state'){
+    const p=msg.player;if(!p)return;
+    if(p.playerId===state.playerId){state.local.hp=p.hp??state.local.hp;state.local.maxHp=p.maxHp??100}
+    else{if(!state.peer||state.peer.playerId!==p.playerId)setPeer(p);state.remote.targetX=p.x;state.remote.targetY=p.y;state.remote.hp=p.hp??100;state.remote.maxHp=p.maxHp??100;state.peerConnected=true;els.waiting.classList.add('hidden')}
+    updateHud();return;
   }
-  const w = state.world;
-  if (!w.lightGateOpen) {
-    els.objectiveText.textContent = state.role === 'shadow'
-      ? 'Find the Moon Switch and press LINK to open your partner’s gate.'
-      : 'Your gate is sealed. Your Shadow partner must activate the Moon Switch.';
-  } else if (!w.shadowGateOpen) {
-    els.objectiveText.textContent = state.role === 'light'
-      ? 'Cross the gate and activate the Sun Altar for your Shadow partner.'
-      : 'Guide your Light partner to the Sun Altar so your seal can be broken.';
-  } else if (!w.victory) {
-    const ready = state.role === 'light' ? w.lightReady : w.shadowReady;
-    els.objectiveText.textContent = ready
-      ? 'Link anchored. Your partner must reach the Nexus.'
-      : 'Both gates are open. Reach the Nexus and press LINK together.';
-  } else {
-    els.objectiveText.textContent = 'The temple is stable. You escaped together.';
+  if(msg.type==='world-state'){
+    const old=state.world;state.world=msg.world;state.selectedLevel=Number(msg.world?.levelId||state.selectedLevel);
+    if(msg.cause==='attack'&&msg.targetId)state.enemyHitFx.set(msg.targetId,performance.now());
+    if(msg.cause==='link-burst')toast('LINK BURST — dimensions merged!');
+    if(old&&!old.completed&&state.world.completed)completeMission();
+    if(old&&!old.failed&&state.world.failed)failMission();
+    updateHud();return;
   }
+  if(msg.type==='pong'){els.latency.textContent=`${Math.max(0,Date.now()-Number(msg.clientTs||Date.now()))} ms`;return}
+  if(msg.type==='error'){state.roomId='';state.socket?.close();show(els.room);els.lobbyError.textContent=msg.message||'Could not join room.'}
+}
+function setPeer(p){
+  state.peer=p||null;state.peerConnected=Boolean(p);
+  if(p){Object.assign(state.remote,{x:p.x,targetX:p.x,y:p.y,targetY:p.y,hp:p.hp??100,maxHp:p.maxHp??100});els.waiting.classList.add('hidden')}
+  else els.waiting.classList.remove('hidden');updateHud();
+}
+function configureHud(){
+  const l=getLevel(state.selectedLevel);els.hudLevel.textContent=pad(l.id);els.hudLevelName.textContent=l.name;els.objective.textContent=l.objectiveText;
+  els.roomLabel.textContent=state.roomId;els.shareCode.textContent=state.roomId;els.roleBadge.textContent=(state.role||'light').toUpperCase();
+  els.roleBadge.style.color=state.role==='light'?'#ffd66f':'#c5b7ff';
+}
+function updateHud(){
+  const link=clamp(Number(state.world?.link||0),0,100);state.burstPeak=Math.max(state.burstPeak,Number(state.world?.peakLink||0));
+  els.linkFill.style.width=`${link}%`;els.linkPercent.textContent=`${Math.round(link)}%`;els.link.classList.toggle('ready',link>=100);
+  els.selfHpFill.style.width=`${clamp(state.local.hp,0,100)}%`;els.selfHpText.textContent=Math.round(state.local.hp);
+  els.partnerHpFill.style.width=`${clamp(state.remote.hp||0,0,100)}%`;els.partnerHpText.textContent=state.peerConnected?Math.round(state.remote.hp):'--';
+}
+function startIntro(){
+  if(state.introPlayed||!state.peerConnected)return;state.introPlayed=true;els.waiting.classList.add('hidden');
+  const l=getLevel(state.selectedLevel),c=getChapter(l.chapter);els.introChapter.textContent=`CHAPTER ${chapterRoman(c.id)} · ${c.name}`;els.introLevel.textContent=`LEVEL ${pad(l.id)}`;els.introTitle.textContent=l.name;els.introText.textContent=l.intro;els.intro.classList.remove('hidden');
+  let n=3;els.introCountdown.textContent=n;const timer=setInterval(()=>{n--;els.introCountdown.textContent=n>0?n:'LINK!';if(n<0){clearInterval(timer);els.intro.classList.add('hidden')}},700);
 }
 
-function toast(message) {
-  clearTimeout(state.toastTimer);
-  els.toast.textContent = message;
-  els.toast.classList.add('show');
-  state.toastTimer = setTimeout(() => els.toast.classList.remove('show'), 1900);
+els.leave.onclick=()=>leaveToLevels();
+function leaveToLevels(){
+  state.roomId='';state.socket?.close();state.socket=null;state.peer=null;state.peerConnected=false;state.world=null;state.joined=false;
+  state.chapter=getLevel(state.selectedLevel).chapter;renderChapters();renderLevels();show(els.levels);
 }
+els.replay.onclick=els.retry.onclick=()=>{els.result.classList.add('hidden');els.failed.classList.add('hidden');state.resultShown=false;send({type:'action',action:'restart'})};
+els.next.onclick=()=>{const next=Math.min(20,state.selectedLevel+1);leaveToLevels();selectLevel(next)};
 
-function resetRoundPosition() {
-  const start = state.role === 'shadow' ? { x: 110, y: 370 } : { x: 110, y: 250 };
-  state.local.x = start.x;
-  state.local.y = start.y;
-  state.local.vx = 0;
-  state.local.vy = 0;
-  state.lastSentX = NaN;
-  state.lastSentY = NaN;
-  els.victoryOverlay.classList.add('hidden');
+function completeMission(){
+  if(state.resultShown)return;state.resultShown=true;
+  const l=getLevel(state.selectedLevel),elapsed=Date.now()-state.missionStartedAt;
+  const fast=elapsed<=l.targetTime*1000,healthy=state.local.hp>=45&&state.remote.hp>=45;const stars=1+Number(fast)+Number(healthy);
+  state.stars[l.id]=Math.max(Number(state.stars[l.id]||0),stars);state.unlocked=Math.max(state.unlocked,Math.min(20,l.id+1));saveProgress();
+  els.resultTitle.textContent=`${l.name} cleared`;els.resultStars.textContent='★'.repeat(stars)+'☆'.repeat(3-stars);els.resultTime.textContent=fmtTime(elapsed);
+  els.resultKills.textContent=state.world?.kills||0;els.resultLink.textContent=`${Math.round(state.world?.peakLink||state.burstPeak)}%`;els.next.textContent=l.id===20?'Campaign complete':'Next mission';els.result.classList.remove('hidden');
 }
+function failMission(){if(state.resultShown)return;state.resultShown=true;els.failed.classList.remove('hidden')}
 
-function beginGame(roomId) {
-  const name = els.playerName.value.trim().replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 16) || 'Explorer';
-  state.name = name;
-  sessionStorage.setItem('shadow-link:name', name);
-  els.lobbyError.textContent = '';
-  showGame();
-  connect(roomId);
+function inputVector(){
+  let x=state.stick.x,y=state.stick.y;if(state.keys.has('a'))x--;if(state.keys.has('d'))x++;if(state.keys.has('w'))y--;if(state.keys.has('s'))y++;
+  const m=Math.hypot(x,y);return m>1?{x:x/m,y:y/m}:{x,y};
 }
-
-els.createRoom.addEventListener('click', () => beginGame(makeRoomCode()));
-els.joinRoom.addEventListener('click', () => {
-  const room = els.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
-  if (room.length < 4) {
-    els.lobbyError.textContent = 'Enter a 4–6 character room code.';
-    return;
-  }
-  beginGame(room);
-});
-els.roomCode.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') els.joinRoom.click();
-});
-els.roomCode.addEventListener('input', () => {
-  els.roomCode.value = els.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
-});
-
-els.leaveGame.addEventListener('click', () => {
-  state.intentionalClose = true;
-  clearTimeout(state.reconnectTimer);
-  stopPing();
-  state.socket?.close();
-  state.socket = null;
-  state.roomId = '';
-  state.connected = false;
-  state.joined = false;
-  state.peer = null;
-  state.peerConnected = false;
-  state.role = null;
-  state.world = defaultWorld();
-  els.victoryOverlay.classList.add('hidden');
-  showLobby('');
-});
-
-els.restartGame.addEventListener('click', () => {
-  send({ type: 'action', target: 'restart' });
-});
-
-function normalizeKey(key) {
-  const k = key.toLowerCase();
-  if (k === 'arrowup') return 'w';
-  if (k === 'arrowdown') return 's';
-  if (k === 'arrowleft') return 'a';
-  if (k === 'arrowright') return 'd';
-  return k;
+function updatePlayer(dt,now){
+  if(!state.joined||state.world?.completed||state.world?.failed||state.local.hp<=0){state.local.vx=state.local.vy=0;return}
+  const v=inputVector(),speed=now<state.dashUntil?480:235;state.local.vx=v.x*speed;state.local.vy=v.y*speed;
+  state.local.x=clamp(state.local.x+state.local.vx*dt,35,WORLD.width-35);state.local.y=clamp(state.local.y+state.local.vy*dt,35,WORLD.height-35);
 }
-
-window.addEventListener('keydown', (event) => {
-  const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  const key = normalizeKey(event.key);
-  if (['w','a','s','d'].includes(key)) {
-    event.preventDefault();
-    state.keys.add(key);
-  }
-  if (key === 'shift') triggerDash();
-  if (key === 'e' || key === ' ') {
-    event.preventDefault();
-    interact();
-  }
-});
-window.addEventListener('keyup', (event) => state.keys.delete(normalizeKey(event.key)));
-window.addEventListener('blur', () => state.keys.clear());
-
-function updateStick(event) {
-  const rect = els.joystick.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  let dx = event.clientX - cx;
-  let dy = event.clientY - cy;
-  const max = rect.width * 0.31;
-  const length = Math.hypot(dx, dy) || 1;
-  if (length > max) {
-    dx = (dx / length) * max;
-    dy = (dy / length) * max;
-  }
-  state.stick.x = dx / max;
-  state.stick.y = dy / max;
-  els.joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+function networkMove(now){
+  if(!state.joined||now-state.lastNet<NET_MS)return;
+  const moved=!Number.isFinite(state.lastSentX)||Math.hypot(state.local.x-state.lastSentX,state.local.y-state.lastSentY)>.4||Math.abs(state.local.vx)+Math.abs(state.local.vy)>1;
+  if(!moved&&now-state.lastNet<260)return;state.lastNet=now;state.lastSentX=state.local.x;state.lastSentY=state.local.y;state.local.seq++;
+  send({type:'move',x:+state.local.x.toFixed(1),y:+state.local.y.toFixed(1),vx:+state.local.vx.toFixed(1),vy:+state.local.vy.toFixed(1),seq:state.local.seq});
 }
-
-els.joystick.addEventListener('pointerdown', (event) => {
-  state.stick.pointerId = event.pointerId;
-  els.joystick.setPointerCapture(event.pointerId);
-  updateStick(event);
-});
-els.joystick.addEventListener('pointermove', (event) => {
-  if (state.stick.pointerId !== event.pointerId) return;
-  updateStick(event);
-});
-function releaseStick(event) {
-  if (state.stick.pointerId !== event.pointerId) return;
-  state.stick.pointerId = null;
-  state.stick.x = 0;
-  state.stick.y = 0;
-  els.joystickKnob.style.transform = 'translate(0, 0)';
+function triggerDash(){const now=performance.now();if(now<state.dashCooldown||state.local.hp<=0)return;state.dashUntil=now+180;state.dashCooldown=now+780}
+function nearestEnemy(range=220){
+  let best=null,d=range;for(const e of state.world?.enemies||[]){if(!e.alive)continue;const p=enemyDisplayPos(e,performance.now());const x=Math.hypot(p.x-state.local.x,p.y-state.local.y);if(x<d){d=x;best=e}}return best;
 }
-els.joystick.addEventListener('pointerup', releaseStick);
-els.joystick.addEventListener('pointercancel', releaseStick);
-
-els.dashBtn.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  triggerDash();
-});
-els.interactBtn.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  interact();
-});
-
-function triggerDash() {
-  const now = performance.now();
-  if (!state.joined || now < state.dashCooldownUntil) return;
-  state.dashUntil = now + 170;
-  state.dashCooldownUntil = now + 760;
+function attack(special=false){
+  const now=performance.now(),cool=special?900:330;if(now<(special?state.specialCooldown:state.attackCooldown)||state.local.hp<=0)return;
+  const target=nearestEnemy(special?250:175);if(!target){toast('Move closer to an enemy');return}
+  if(special)state.specialCooldown=now+cool;else state.attackCooldown=now+cool;
+  state.shake=special?7:3;burstParticles(target.x,target.y,special?12:6);send({type:'action',action:special?'special':'attack',targetId:target.id});
 }
+function useLink(){if(Number(state.world?.link||0)<100){toast(`Link energy ${Math.round(state.world?.link||0)}%`);return}send({type:'action',action:'link'})}
+els.attack.onpointerdown=e=>{e.preventDefault();attack(false)};els.special.onpointerdown=e=>{e.preventDefault();attack(true)};els.dash.onpointerdown=e=>{e.preventDefault();triggerDash()};els.link.onpointerdown=e=>{e.preventDefault();useLink()};
 
-function interact() {
-  if (!state.joined) return;
-  const target = nearestInteractable();
-  if (!target) {
-    toast('Nothing here is linked to your dimension');
-    return;
-  }
-  send({ type: 'action', target: target.id });
-  if (target.id === 'moon-switch') toast('Moon Switch linked');
-  if (target.id === 'sun-altar') toast('Sun Altar linked');
-  if (target.id === 'nexus') toast('Nexus link anchored');
+function enemyDisplayPos(e,time){
+  const amp=e.boss?22:12,phase=e.id.split('').reduce((a,c)=>a+c.charCodeAt(0),0);return{x:e.x+Math.sin(time/900+phase)*amp,y:e.y+Math.cos(time/1100+phase)*amp};
 }
-
-function nearestInteractable() {
-  const list = [];
-  if (state.role === 'shadow' && !state.world.lightGateOpen) list.push({ id: 'moon-switch', x: 300, y: 440 });
-  if (state.role === 'light' && state.world.lightGateOpen && !state.world.shadowGateOpen) list.push({ id: 'sun-altar', x: 690, y: 180 });
-  if (state.world.lightGateOpen && state.world.shadowGateOpen && !state.world.victory) list.push({ id: 'nexus', x: 860, y: 310 });
-  let best = null;
-  let bestDistance = 78;
-  for (const item of list) {
-    const distance = Math.hypot(state.local.x - item.x, state.local.y - item.y);
-    if (distance < bestDistance) {
-      best = item;
-      bestDistance = distance;
-    }
-  }
-  return best;
+function enemyDanger(now){
+  if(!state.world||state.local.hp<=0||now-state.lastHurt<520)return;
+  for(const e of state.world.enemies||[]){if(!e.alive)continue;const p=enemyDisplayPos(e,now);if(Math.hypot(p.x-state.local.x,p.y-state.local.y)<(e.boss?72:48)){state.lastHurt=now;send({type:'hurt',damage:e.boss?12:7});state.shake=9;return}}
+  for(const h of state.world.hazards||[]){const active=((now+h.phase)%2600)<900;if(active&&Math.hypot(h.x-state.local.x,h.y-state.local.y)<h.radius){state.lastHurt=now;send({type:'hurt',damage:9});state.shake=7;return}}
 }
+function worldTick(now){if(!state.joined||now-state.lastTick<1000)return;state.lastTick=now;send({type:'action',action:'tick'})}
+function updateRemote(dt){const b=1-Math.pow(.001,dt);state.remote.x+=(state.remote.targetX-state.remote.x)*b;state.remote.y+=(state.remote.targetY-state.remote.y)*b}
 
-function inputVector() {
-  let x = state.stick.x;
-  let y = state.stick.y;
-  if (state.keys.has('a')) x -= 1;
-  if (state.keys.has('d')) x += 1;
-  if (state.keys.has('w')) y -= 1;
-  if (state.keys.has('s')) y += 1;
-  const length = Math.hypot(x, y);
-  if (length > 1) return { x: x / length, y: y / length };
-  return { x, y };
+function themeColors(theme){
+  if(theme==='ruins')return['#171016','#321922','#ff875f','#865ee8'];
+  if(theme==='rift')return['#0b1020','#151d38','#5ad4ff','#9a78ff'];
+  if(theme==='collapse')return['#12080d','#2a0c1e','#ff5c6f','#b45cff'];
+  return['#16141a','#28201c','#ffd16c','#9478ee'];
 }
-
-function blockedByGate(x, y) {
-  const gateOpen = state.role === 'light' ? state.world.lightGateOpen : state.world.shadowGateOpen;
-  if (gateOpen) return false;
-  const gate = { x: 478, y: 72, w: 34, h: 476 };
-  return circleRect(x, y, PLAYER_RADIUS, gate);
+function draw(now){
+  const l=getLevel(state.selectedLevel),colors=themeColors(l.theme),burst=now<Number(state.world?.burstUntil||0);
+  ctx.save();if(state.shake>0){ctx.translate((Math.random()-.5)*state.shake,(Math.random()-.5)*state.shake);state.shake*=.82}
+  const g=ctx.createLinearGradient(0,0,WORLD.width,WORLD.height);g.addColorStop(0,colors[0]);g.addColorStop(1,colors[1]);ctx.fillStyle=g;ctx.fillRect(0,0,WORLD.width,WORLD.height);
+  drawArena(colors,burst,now);drawHazards(now,colors);drawEnemies(now,colors,burst);drawPartner(colors);drawPlayer(colors,burst);drawParticles();drawMissionClock(now,l);ctx.restore();
 }
-
-function circleRect(cx, cy, r, rect) {
-  const nearestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
-  const nearestY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
-  const dx = cx - nearestX;
-  const dy = cy - nearestY;
-  return dx * dx + dy * dy < r * r;
+function drawArena(colors,burst,now){
+  ctx.strokeStyle=burst?'rgba(255,240,190,.14)':'rgba(255,255,255,.045)';ctx.lineWidth=1;
+  for(let x=30;x<WORLD.width;x+=60){ctx.beginPath();ctx.moveTo(x,20);ctx.lineTo(x,WORLD.height-20);ctx.stroke()}
+  for(let y=30;y<WORLD.height;y+=60){ctx.beginPath();ctx.moveTo(20,y);ctx.lineTo(WORLD.width-20,y);ctx.stroke()}
+  ctx.strokeStyle=colors[2]+'33';ctx.lineWidth=4;ctx.strokeRect(18,18,WORLD.width-36,WORLD.height-36);
+  if(getLevel(state.selectedLevel).darknessPulse&&Math.floor(now/4000)%2===1){const grad=ctx.createRadialGradient(state.local.x,state.local.y,80,state.local.x,state.local.y,320);grad.addColorStop(0,'rgba(0,0,0,0)');grad.addColorStop(1,'rgba(0,0,0,.83)');ctx.fillStyle=grad;ctx.fillRect(0,0,WORLD.width,WORLD.height)}
+  if(burst){ctx.fillStyle='rgba(170,145,255,.07)';ctx.fillRect(0,0,WORLD.width,WORLD.height)}
 }
-
-function updatePlayer(dt, now) {
-  if (!state.joined || state.world.victory) {
-    state.local.vx = 0;
-    state.local.vy = 0;
-    return;
-  }
-  const input = inputVector();
-  const dashing = now < state.dashUntil;
-  const speed = dashing ? 430 : 205;
-  const vx = input.x * speed;
-  const vy = input.y * speed;
-  state.local.vx = vx;
-  state.local.vy = vy;
-
-  let nextX = clamp(state.local.x + vx * dt, PLAYER_RADIUS + 10, WORLD.width - PLAYER_RADIUS - 10);
-  let nextY = clamp(state.local.y + vy * dt, PLAYER_RADIUS + 10, WORLD.height - PLAYER_RADIUS - 10);
-
-  if (!blockedByGate(nextX, state.local.y)) state.local.x = nextX;
-  if (!blockedByGate(state.local.x, nextY)) state.local.y = nextY;
-
-  const target = nearestInteractable();
-  state.lastInteractTarget = target;
-  els.interactBtn.classList.toggle('ready', Boolean(target));
+function drawHazards(now,colors){
+  for(const h of state.world?.hazards||[]){const active=((now+h.phase)%2600)<900;ctx.save();ctx.strokeStyle=active?'rgba(255,90,110,.75)':colors[3]+'44';ctx.fillStyle=active?'rgba(255,75,95,.10)':'rgba(155,125,255,.035)';ctx.lineWidth=active?4:2;ctx.beginPath();ctx.arc(h.x,h.y,h.radius+(active?Math.sin(now/80)*5:0),0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore()}
 }
-
-function sendMovement(now) {
-  if (!state.joined || now - state.lastNetSend < NET_INTERVAL_MS) return;
-  const moved = !Number.isFinite(state.lastSentX)
-    || Math.hypot(state.local.x - state.lastSentX, state.local.y - state.lastSentY) > 0.5
-    || Math.abs(state.local.vx) + Math.abs(state.local.vy) > 0.1;
-  if (!moved && now - state.lastNetSend < 250) return;
-
-  state.lastNetSend = now;
-  state.lastSentX = state.local.x;
-  state.lastSentY = state.local.y;
-  state.local.seq += 1;
-  send({
-    type: 'move',
-    x: round1(state.local.x),
-    y: round1(state.local.y),
-    vx: round1(state.local.vx),
-    vy: round1(state.local.vy),
-    seq: state.local.seq,
-  });
-}
-
-function round1(n) { return Math.round(n * 10) / 10; }
-function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
-
-function updateRemote(dt) {
-  const blend = 1 - Math.pow(0.001, dt);
-  state.remote.x += (state.remote.targetX - state.remote.x) * blend;
-  state.remote.y += (state.remote.targetY - state.remote.y) * blend;
-}
-
-function drawWorld(time) {
-  const light = state.role !== 'shadow';
-  const bg = ctx.createLinearGradient(0, 0, WORLD.width, WORLD.height);
-  if (light) {
-    bg.addColorStop(0, '#1a1720');
-    bg.addColorStop(.52, '#211d22');
-    bg.addColorStop(1, '#10131c');
-  } else {
-    bg.addColorStop(0, '#0d1022');
-    bg.addColorStop(.55, '#17122b');
-    bg.addColorStop(1, '#080d18');
-  }
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, WORLD.width, WORLD.height);
-
-  drawFloorGrid(light);
-  drawRuins(light);
-  drawGate(light);
-  drawInteractables(light, time);
-  drawLinkLine();
-  drawRemotePlayer(light);
-  drawLocalPlayer(light);
-  drawVignette(light);
-}
-
-function drawFloorGrid(light) {
-  ctx.save();
-  ctx.strokeStyle = light ? 'rgba(255,221,130,.055)' : 'rgba(156,130,255,.065)';
-  ctx.lineWidth = 1;
-  for (let x = 20; x < WORLD.width; x += 50) {
-    ctx.beginPath(); ctx.moveTo(x, 15); ctx.lineTo(x, WORLD.height - 15); ctx.stroke();
-  }
-  for (let y = 20; y < WORLD.height; y += 50) {
-    ctx.beginPath(); ctx.moveTo(15, y); ctx.lineTo(WORLD.width - 15, y); ctx.stroke();
-  }
-  ctx.strokeStyle = light ? 'rgba(255,220,130,.17)' : 'rgba(160,136,255,.18)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(14, 14, WORLD.width - 28, WORLD.height - 28);
-  ctx.restore();
-}
-
-function drawRuins(light) {
-  const blocks = [
-    [150, 100, 115, 34], [160, 510, 92, 28], [335, 170, 82, 30],
-    [590, 420, 120, 30], [760, 90, 82, 30], [790, 505, 100, 26],
-  ];
-  ctx.save();
-  for (const [x,y,w,h] of blocks) {
-    ctx.fillStyle = light ? 'rgba(225,201,144,.085)' : 'rgba(140,123,205,.11)';
-    ctx.strokeStyle = light ? 'rgba(255,229,170,.11)' : 'rgba(177,157,255,.13)';
-    roundedRect(x,y,w,h,7);
-    ctx.fill(); ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawGate(light) {
-  const open = light ? state.world.lightGateOpen : state.world.shadowGateOpen;
-  const x = 478;
-  ctx.save();
-  ctx.fillStyle = light ? 'rgba(255,214,105,.14)' : 'rgba(149,120,255,.16)';
-  ctx.fillRect(x - 12, 55, 58, 18);
-  ctx.fillRect(x - 12, 548, 58, 18);
-  if (!open) {
-    const gateGradient = ctx.createLinearGradient(x, 72, x + 34, 548);
-    if (light) {
-      gateGradient.addColorStop(0, 'rgba(255,236,174,.9)');
-      gateGradient.addColorStop(.5, 'rgba(221,164,62,.66)');
-      gateGradient.addColorStop(1, 'rgba(255,236,174,.9)');
-    } else {
-      gateGradient.addColorStop(0, 'rgba(194,178,255,.9)');
-      gateGradient.addColorStop(.5, 'rgba(106,82,207,.68)');
-      gateGradient.addColorStop(1, 'rgba(194,178,255,.9)');
-    }
-    ctx.fillStyle = gateGradient;
-    ctx.fillRect(x, 72, 34, 476);
-    ctx.globalAlpha = .35;
-    for (let y = 85; y < 540; y += 28) ctx.fillRect(x - 8, y, 50, 3);
-  } else {
-    ctx.strokeStyle = light ? 'rgba(255,222,133,.22)' : 'rgba(166,143,255,.24)';
-    ctx.setLineDash([8, 12]);
-    ctx.strokeRect(x, 72, 34, 476);
-  }
-  ctx.restore();
-}
-
-function drawInteractables(light, time) {
-  if (!light) drawRune(300, 440, 28, '#aa90ff', 'MOON SWITCH', !state.world.lightGateOpen, time);
-  if (light) drawRune(690, 180, 30, '#ffda73', 'SUN ALTAR', state.world.lightGateOpen && !state.world.shadowGateOpen, time);
-
-  const nexusActive = state.world.lightGateOpen && state.world.shadowGateOpen;
-  drawNexus(860, 310, nexusActive, time, light);
-
-  if (state.lastInteractTarget) {
-    const p = state.lastInteractTarget;
-    ctx.save();
-    ctx.strokeStyle = '#ffffff';
-    ctx.globalAlpha = .35 + Math.sin(time / 150) * .1;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 48, 0, Math.PI * 2);
-    ctx.stroke();
+function enemyColor(e,colors){if(e.kind.includes('shade')||e.kind==='hunter')return'#a98cff';if(e.kind==='crawler')return'#6ee3c0';if(e.boss)return'#ff6376';return colors[2]}
+function drawEnemies(now,colors,burst){
+  for(const e of state.world?.enemies||[]){if(!e.alive)continue;const p=enemyDisplayPos(e,now),r=e.boss?42:e.kind==='brute'?31:25,hit=now-(state.enemyHitFx.get(e.id)||0)<130;
+    ctx.save();ctx.translate(p.x,p.y);ctx.shadowBlur=hit?28:12;ctx.shadowColor=enemyColor(e,colors);ctx.fillStyle=hit?'#fff':enemyColor(e,colors);ctx.globalAlpha=(e.dimension!=='both'&&e.dimension!==state.role&&!burst)?.32:1;
+    ctx.beginPath();if(e.kind==='crawler'){ctx.moveTo(0,-r);ctx.lineTo(r,r);ctx.lineTo(-r,r);ctx.closePath()}else ctx.arc(0,0,r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+    if(e.shield>0){ctx.strokeStyle='#c8b9ff';ctx.lineWidth=4;ctx.setLineDash([6,5]);ctx.beginPath();ctx.arc(0,0,r+9,0,Math.PI*2);ctx.stroke();ctx.setLineDash([])}
     ctx.restore();
+    const width=e.boss?150:74;ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(p.x-width/2,p.y-r-19,width,6);ctx.fillStyle=e.shield>0?'#a78cff':'#ff687b';ctx.fillRect(p.x-width/2,p.y-r-19,width*(e.hp/e.maxHp),6);
+    if(e.boss){ctx.fillStyle='#fff';ctx.font='800 12px system-ui';ctx.textAlign='center';ctx.fillText(e.kind.replaceAll('-',' ').toUpperCase(),p.x,p.y-r-27)}
   }
 }
-
-function drawRune(x, y, radius, color, label, active, time) {
-  ctx.save();
-  const pulse = active ? 1 + Math.sin(time / 260) * .08 : 1;
-  ctx.translate(x, y);
-  ctx.scale(pulse, pulse);
-  ctx.globalAlpha = active ? 1 : .38;
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color + '22';
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.rotate(time / 1800);
-  ctx.strokeRect(-12, -12, 24, 24);
-  ctx.restore();
-  ctx.save();
-  ctx.fillStyle = 'rgba(235,239,250,.62)';
-  ctx.font = '700 11px system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText(label, x, y + 52);
-  ctx.restore();
+function drawPlayer(colors,burst){
+  const light=state.role==='light',c=light?'#ffda73':'#a58cff';ctx.save();ctx.translate(state.local.x,state.local.y);ctx.shadowBlur=burst?34:18;ctx.shadowColor=c;ctx.fillStyle=state.local.hp>0?c:'#596173';ctx.beginPath();ctx.arc(0,0,PLAYER_RADIUS,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-10,8);ctx.lineTo(13,-10);ctx.stroke();ctx.fillStyle='#fff';ctx.font='900 11px system-ui';ctx.textAlign='center';ctx.fillText('YOU',0,-34);ctx.restore();
+}
+function drawPartner(colors){
+  if(!state.peerConnected)return;ctx.save();ctx.translate(state.remote.x,state.remote.y);ctx.globalAlpha=.65;ctx.fillStyle=state.role==='light'?'#a58cff':'#ffda73';ctx.beginPath();ctx.arc(0,0,19,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.45)';ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(0,0,27,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#fff';ctx.font='800 10px system-ui';ctx.textAlign='center';ctx.fillText(state.peer?.name||'PARTNER',0,-33);ctx.restore();
+}
+function burstParticles(x,y,n){for(let i=0;i<n;i++)state.particles.push({x,y,vx:(Math.random()-.5)*180,vy:(Math.random()-.5)*180,life:1})}
+function drawParticles(){for(const p of state.particles){p.x+=p.vx*.016;p.y+=p.vy*.016;p.life-=.035;ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle='#fff3bd';ctx.fillRect(p.x,p.y,4,4)}ctx.globalAlpha=1;state.particles=state.particles.filter(p=>p.life>0)}
+function drawMissionClock(now,l){
+  let text='';if(l.surviveSeconds&&state.world?.surviveUntil)text=`SURVIVE ${Math.max(0,Math.ceil((state.world.surviveUntil-Date.now())/1000))}s`;if(l.timeLimit&&state.world?.timeLimitUntil)text=`ESCAPE ${Math.max(0,Math.ceil((state.world.timeLimitUntil-Date.now())/1000))}s`;
+  if(text){ctx.fillStyle='rgba(4,6,12,.7)';ctx.fillRect(WORLD.width/2-80,28,160,34);ctx.fillStyle='#fff';ctx.font='900 14px system-ui';ctx.textAlign='center';ctx.fillText(text,WORLD.width/2,50)}
 }
 
-function drawNexus(x, y, active, time, light) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.globalAlpha = active ? 1 : .32;
-  const radius = 44 + Math.sin(time / 400) * 3;
-  ctx.strokeStyle = light ? '#ffd56c' : '#a88fff';
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke();
-  ctx.strokeStyle = light ? '#aa8cff' : '#ffda72';
-  ctx.beginPath(); ctx.arc(0, 0, radius - 14, 0, Math.PI * 2); ctx.stroke();
-  ctx.rotate(-time / 2200);
-  for (let i = 0; i < 4; i++) {
-    ctx.rotate(Math.PI / 2);
-    ctx.fillStyle = 'rgba(255,255,255,.45)';
-    ctx.fillRect(radius - 5, -2, 10, 4);
-  }
-  ctx.restore();
-  ctx.save();
-  ctx.fillStyle = 'rgba(235,239,250,.7)';
-  ctx.font = '800 11px system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText('NEXUS', x, y + 67);
-  ctx.restore();
+function updateStick(e){const r=els.joystick.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,max=r.width*.30;let x=e.clientX-cx,y=e.clientY-cy,m=Math.hypot(x,y)||1;if(m>max){x=x/m*max;y=y/m*max}state.stick.x=x/max;state.stick.y=y/max;els.knob.style.transform=`translate(${x}px,${y}px)`}
+els.joystick.onpointerdown=e=>{state.stick.pointerId=e.pointerId;els.joystick.setPointerCapture(e.pointerId);updateStick(e)};
+els.joystick.onpointermove=e=>{if(state.stick.pointerId===e.pointerId)updateStick(e)};
+function releaseStick(e){if(state.stick.pointerId!==e.pointerId)return;state.stick.pointerId=null;state.stick.x=state.stick.y=0;els.knob.style.transform='translate(0,0)'}
+els.joystick.onpointerup=releaseStick;els.joystick.onpointercancel=releaseStick;
+
+function key(k){k=k.toLowerCase();return({arrowup:'w',arrowdown:'s',arrowleft:'a',arrowright:'d'})[k]||k}
+addEventListener('keydown',e=>{if(document.activeElement?.tagName==='INPUT')return;const k=key(e.key);if(['w','a','s','d'].includes(k)){state.keys.add(k);e.preventDefault()}if(k==='j')attack(false);if(k==='k')attack(true);if(k==='l')useLink();if(k==='shift')triggerDash()});
+addEventListener('keyup',e=>state.keys.delete(key(e.key)));addEventListener('blur',()=>state.keys.clear());
+
+function loop(now){
+  const dt=Math.min(.05,(now-state.lastFrame)/1000);state.lastFrame=now;updatePlayer(dt,now);updateRemote(dt);networkMove(now);enemyDanger(now);worldTick(now);draw(now);requestAnimationFrame(loop)
 }
-
-function drawLinkLine() {
-  if (!state.peerConnected) return;
-  ctx.save();
-  ctx.strokeStyle = state.role === 'light' ? 'rgba(171,145,255,.13)' : 'rgba(255,215,112,.13)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([5, 10]);
-  ctx.beginPath();
-  ctx.moveTo(state.local.x, state.local.y);
-  ctx.lineTo(state.remote.x, state.remote.y);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawLocalPlayer(light) {
-  ctx.save();
-  const x = state.local.x, y = state.local.y;
-  ctx.shadowBlur = 22;
-  ctx.shadowColor = light ? 'rgba(255,214,102,.7)' : 'rgba(157,132,255,.7)';
-  ctx.fillStyle = light ? '#ffdc79' : '#a58cff';
-  ctx.beginPath(); ctx.arc(x, y, PLAYER_RADIUS, 0, Math.PI * 2); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = light ? '#fff6cb' : '#e0d9ff';
-  ctx.beginPath(); ctx.arc(x - 5, y - 6, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,.75)';
-  ctx.font = '800 11px system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText('YOU', x, y - 29);
-  ctx.restore();
-}
-
-function drawRemotePlayer(light) {
-  if (!state.peerConnected) return;
-  ctx.save();
-  const x = state.remote.x, y = state.remote.y;
-  ctx.globalAlpha = .45;
-  ctx.strokeStyle = light ? '#a98fff' : '#ffdb75';
-  ctx.fillStyle = light ? 'rgba(169,143,255,.16)' : 'rgba(255,219,117,.16)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.arc(x, y, PLAYER_RADIUS + 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.globalAlpha = .62;
-  ctx.fillStyle = '#dbe1ee';
-  ctx.font = '700 10px system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText(state.peer?.name || 'PARTNER', x, y - 29);
-  ctx.restore();
-}
-
-function drawVignette(light) {
-  const radial = ctx.createRadialGradient(WORLD.width/2, WORLD.height/2, 160, WORLD.width/2, WORLD.height/2, 610);
-  radial.addColorStop(.55, 'rgba(0,0,0,0)');
-  radial.addColorStop(1, light ? 'rgba(4,5,10,.58)' : 'rgba(2,4,12,.65)');
-  ctx.fillStyle = radial;
-  ctx.fillRect(0, 0, WORLD.width, WORLD.height);
-}
-
-function roundedRect(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-}
-
-function gameLoop(now) {
-  const dt = Math.min((now - state.lastFrame) / 1000, 0.05);
-  state.lastFrame = now;
-  updatePlayer(dt, now);
-  updateRemote(dt);
-  sendMovement(now);
-  drawWorld(now);
-  requestAnimationFrame(gameLoop);
-}
-
-requestAnimationFrame(gameLoop);
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    state.keys.clear();
-    state.stick.x = 0;
-    state.stick.y = 0;
-    els.joystickKnob.style.transform = 'translate(0, 0)';
-  }
-});
+requestAnimationFrame(loop);
+updateHud();
